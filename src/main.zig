@@ -34,6 +34,11 @@ const Emulator = struct {
         }
         std.mem.copyForwards(u8, self.memory[(0x200)..], program);
     }
+
+    fn tick_timers(self: *Emulator) void {
+        self.delay_timer -|= 1;
+        self.sound_timer -|= 1;
+    }
 };
 
 pub fn main() !void {
@@ -50,21 +55,30 @@ pub fn main() !void {
     var frameTimeBuf: [32]u8 = undefined;
     var frameTimeText: []u8 = "";
 
+    var emulator = Emulator.new();
+
     while (!rl.windowShouldClose()) {
+        // Runs once each frame.
         rl.beginDrawing();
         defer rl.endDrawing();
+
         rl.clearBackground(rl.Color.white);
         rl.drawText("Work in progress!", screenWidth / 2 - 100, screenHeight / 2 - 20, 20, rl.Color.black);
+
         frameClock +%= 1;
         const time = rl.getTime();
         const deltaTime = rl.getFrameTime() * 1000; // milliseconds
         recentFrameTimes[frameClock % 32] = deltaTime;
-        if (time > 0.5 and frameClock % 8 == 0) {
+        if (time > 0.6 and frameClock % 8 == 0) {
             const averageFrameTime = std.math.average(recentFrameTimes);
             frameTimeText = try std.fmt.bufPrint(&frameTimeBuf, "Frame time: {d:.2} ms\n", .{averageFrameTime});
             frameTimeText[frameTimeText.len - 1] = 0;
         }
         rl.drawText(@ptrCast(frameTimeText), 10, 10, 20, rl.Color.dark_gray);
+
+        // Emulator logic
+
+        emulator.tick_timers();
     }
 }
 
@@ -79,4 +93,21 @@ test "program initialization" {
     try expect(emulator.memory[0x201] == 0xFF);
     try expect(emulator.memory[0x3FF] == 0xFF);
     try expect(emulator.memory[0x400] == 0x00);
+}
+
+test "timer tick" {
+    var emulator = Emulator.new();
+    emulator.delay_timer = 10;
+    emulator.sound_timer = 5;
+    emulator.tick_timers();
+    try expect(emulator.delay_timer == 9);
+    try expect(emulator.sound_timer == 4);
+    emulator.delay_timer = 1;
+    emulator.sound_timer = 0;
+    emulator.tick_timers();
+    try expect(emulator.delay_timer == 0);
+    try expect(emulator.sound_timer == 0);
+    emulator.tick_timers();
+    try expect(emulator.delay_timer == 0);
+    try expect(emulator.sound_timer == 0);
 }
