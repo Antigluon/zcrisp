@@ -1,0 +1,1 @@
+In `emcc.zig`, the zig bindings add `webhack.c`, which contains symbols that were once needed for the build step. This is no longer true in zig 0.13.0, so webhack must be modified to remove the stack check symbols.

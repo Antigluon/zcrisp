@@ -3,7 +3,7 @@ const std = @import("std");
 // Although this function looks imperative, note that its job is to
 // declaratively construct a build graph that will be executed by an external
 // runner.
-pub fn build(b: *std.Build) void {
+pub fn build(b: *std.Build) !void {
     // Standard target options allows the person running `zig build` to choose
     // what target to build for. Here we do not override the defaults, which
     // means any target is allowed, and the default is native. Other options
@@ -15,19 +15,49 @@ pub fn build(b: *std.Build) void {
     // set a preferred release mode, allowing the user to decide how to optimize.
     const optimize = b.standardOptimizeOption(.{});
 
-    const lib = b.addStaticLibrary(.{
-        .name = "zcrisp",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/root.zig"),
+    // ** Raylib **
+    const raylib_dep = b.dependency("raylib-zig", .{
         .target = target,
         .optimize = optimize,
     });
 
+    const raylib = raylib_dep.module("raylib"); // main raylib module
+    const raygui = raylib_dep.module("raygui"); // raygui module
+    const raylib_artifact = raylib_dep.artifact("raylib"); // raylib C library
+
+    // Emscripten support - from raylib-zig project example
+    const rlz = @import("raylib-zig");
+    if (target.query.os_tag == .emscripten) {
+        const exe_lib = rlz.emcc.compileForEmscripten(b, "'zcrisp'", "src/main.zig", target, optimize);
+
+        raylib_artifact.addIncludePath(b.path(b.pathJoin(&.{ b.sysroot.?, "cache", "sysroot", "include" })));
+        exe_lib.linkLibrary(raylib_artifact);
+        exe_lib.root_module.addImport("raylib", raylib);
+
+        // Note that raylib itself is not actually added to the exe_lib output file, so it also needs to be linked with emscripten.
+        const link_step = try rlz.emcc.linkWithEmscripten(b, &[_]*std.Build.Step.Compile{ exe_lib, raylib_artifact });
+
+        b.getInstallStep().dependOn(&link_step.step);
+        const run_step = try rlz.emcc.emscriptenRunStep(b);
+        run_step.step.dependOn(&link_step.step);
+        const run_option = b.step("run", "Run 'zcrisp'");
+        run_option.dependOn(&run_step.step);
+        return;
+    }
+
+    // const lib = b.addStaticLibrary(.{
+    //     .name = "zcrisp",
+    //     // In this case the main source file is merely a path, however, in more
+    //     // complicated build scripts, this could be a generated file.
+    //     .root_source_file = b.path("src/root.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+
     // This declares intent for the library to be installed into the standard
     // location when the user invokes the "install" step (the default step when
     // running `zig build`).
-    b.installArtifact(lib);
+    // b.installArtifact(lib);
 
     const exe = b.addExecutable(.{
         .name = "zcrisp",
@@ -35,6 +65,10 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
+
+    exe.linkLibrary(raylib_artifact);
+    exe.root_module.addImport("raylib", raylib);
+    exe.root_module.addImport("raygui", raygui);
 
     // This declares intent for the executable to be installed into the
     // standard location when the user invokes the "install" step (the default
