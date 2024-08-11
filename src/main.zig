@@ -93,6 +93,9 @@ test "program initialization" {
     try expect(emulator.memory[0x201] == 0xFF);
     try expect(emulator.memory[0x3FF] == 0xFF);
     try expect(emulator.memory[0x400] == 0x00);
+
+    const tooLong = [_]u8{0x00} ** 0x2000;
+    try expect(emulator.load_program(&tooLong) == error.OutofMemory);
 }
 
 test "timer tick" {
