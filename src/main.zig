@@ -43,12 +43,28 @@ pub fn main() !void {
     rl.initWindow(screenWidth, screenHeight, "ZCrisp Emulator");
     defer rl.closeWindow();
 
+    rl.setTargetFPS(60);
+
+    var recentFrameTimes: [20]f32 = [_]f32{0.0} ** 20;
+    var frameClock: u8 = 0;
+    var frameTimeBuf: [32]u8 = undefined;
+    var frameTimeText: []u8 = "";
+
     while (!rl.windowShouldClose()) {
         rl.beginDrawing();
         defer rl.endDrawing();
-
         rl.clearBackground(rl.Color.white);
         rl.drawText("Work in progress!", screenWidth / 2 - 100, screenHeight / 2 - 20, 20, rl.Color.black);
+        frameClock +%= 1;
+        const time = rl.getTime();
+        const deltaTime = rl.getFrameTime() * 1000; // milliseconds
+        recentFrameTimes[frameClock % 32] = deltaTime;
+        if (time > 0.5 and frameClock % 8 == 0) {
+            const averageFrameTime = std.math.average(recentFrameTimes);
+            frameTimeText = try std.fmt.bufPrint(&frameTimeBuf, "Frame time: {d:.2} ms\n", .{averageFrameTime});
+            frameTimeText[frameTimeText.len - 1] = 0;
+        }
+        rl.drawText(@ptrCast(frameTimeText), 10, 10, 20, rl.Color.dark_gray);
     }
 }
 
