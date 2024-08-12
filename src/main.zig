@@ -18,12 +18,26 @@ fn decode_instruction(instructionCode: u16) !Instruction {
     const opcode: u4 = @truncate(instructionCode >> 12);
     return switch (opcode) {
         0x0 => .{ .ClearScreen = {} },
-        0x1 => .{ .Jump = .{ .dest = @truncate(instructionCode) } },
-        0x6 => .{ .Set = .{ .reg = @truncate(instructionCode >> 8), .val = @truncate(instructionCode) } },
-        0x7 => .{ .Add = .{ .reg = @truncate(instructionCode >> 8), .val = @truncate(instructionCode) } },
-        0xA => .{ .SetIndex = .{ .val = @truncate(instructionCode) } },
-        0xD => .{ .Draw = .{ .regX = @truncate(instructionCode >> 8), .regY = @truncate(instructionCode >> 4), .height = @truncate(instructionCode) } },
-        else => error.InvalidInput,
+        0x1 => .{ .Jump = .{
+            .dest = @truncate(instructionCode),
+        } },
+        0x6 => .{ .Set = .{
+            .reg = @truncate(instructionCode >> 8),
+            .val = @truncate(instructionCode),
+        } },
+        0x7 => .{ .Add = .{
+            .reg = @truncate(instructionCode >> 8),
+            .val = @truncate(instructionCode),
+        } },
+        0xA => .{ .SetIndex = .{
+            .val = @truncate(instructionCode),
+        } },
+        0xD => .{ .Draw = .{
+            .regX = @truncate(instructionCode >> 8),
+            .regY = @truncate(instructionCode >> 4),
+            .height = @truncate(instructionCode),
+        } },
+        else => error.InvalidInstruction,
     };
 }
 
@@ -82,7 +96,12 @@ const Emulator = struct {
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
             .SetIndex => |instr| self.index = instr.val,
-            .Draw => |instr| self.drawSprite(self.memory[self.index], self.registers[instr.regX], self.registers[instr.regY], instr.height),
+            .Draw => |instr| self.drawSprite(
+                self.memory[self.index],
+                self.registers[instr.regX],
+                self.registers[instr.regY],
+                instr.height,
+            ),
         }
     }
 
@@ -131,8 +150,8 @@ const Emulator = struct {
 };
 
 pub fn main() !void {
-    const window_width = 1280;
-    const window_height = 800;
+    const window_width = 1600;
+    const window_height = 960;
 
     var prng = std.rand.DefaultPrng.init(0);
     var rand = prng.random();
@@ -183,7 +202,10 @@ pub fn main() !void {
 
         const scale = 16.0;
         rl.updateTexture(screen, &emulator.display);
-        rl.drawTextureEx(screen, rl.Vector2{ .x = (window_width - screen_width * scale) / 2, .y = (window_height - screen_height * scale) / 2 }, 0.0, scale, rl.Color.dark_green);
+        rl.drawTextureEx(screen, rl.Vector2{
+            .x = (window_width - screen_width * scale) / 2,
+            .y = (window_height - screen_height * scale) / 2,
+        }, 0.0, scale, rl.Color.dark_green);
     }
 }
 
