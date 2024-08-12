@@ -70,6 +70,12 @@ const Emulator = struct {
         self.delay_timer -|= 1;
         self.sound_timer -|= 1;
     }
+
+    fn execute_instruction(self: *Emulator, instr: Instruction) void {
+        self;
+        instr;
+        @panic("@ the disco");
+    }
 };
 
 pub fn main() !void {
