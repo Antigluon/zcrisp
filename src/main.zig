@@ -1,7 +1,9 @@
 const rl = @import("raylib");
 const std = @import("std");
 
-const display_size = 64 * 32 / 8;
+const screen_width = 64;
+const screen_height = 32;
+const display_size = screen_width * screen_height;
 
 const Opcode = enum(u4) {
     ClearScreen = 0x0,
@@ -71,18 +73,71 @@ const Emulator = struct {
         self.sound_timer -|= 1;
     }
 
-    fn execute_instruction(self: *Emulator, instr: Instruction) void {
-        self;
-        instr;
-        @panic("@ the disco");
+    /// Executes a decoded instruction.
+    fn execute_instruction(self: *Emulator, instruction: Instruction) void {
+        // @panic("@ the disco");
+        switch (instruction) {
+            .ClearScreen => @memset(self.display, 0),
+            .Jump => |instr| self.pc = instr.dest,
+            .Set => |instr| self.registers[instr.reg] = instr.val,
+            .Add => |instr| self.registers[instr.reg] +|= instr.val,
+            .SetIndex => |instr| self.index = instr.val,
+            .Draw => |instr| self.drawSprite(self.memory[self.index], self.registers[instr.regX], self.registers[instr.regY], instr.height),
+        }
+    }
+
+    /// Decodes and executes the instruction at `self.pc`, advancing the program counter as applicable.
+    fn step(self: *Emulator) !void {
+        const instruction_code = self.memory[self.pc];
+        self.pc += 2;
+        self.execute_instruction(try decode_instruction(instruction_code));
+    }
+
+    fn drawSprite(self: *Emulator, sprite_ptr: u16, x_pos: u8, y_pos: u8, height: u8) void {
+        var y: u8 = y_pos % screen_height;
+        for (0..height) |row| {
+            for (0..8) |_| {
+                var x = x_pos % screen_width;
+                _ = (y) * screen_width + x;
+                _ = self.memory(sprite_ptr) + row;
+                x += 1;
+            }
+            y += 1;
+        }
+    }
+
+    /// Writes `state` to the pixel given by x and y.
+    /// Sets VF <- 1 if a pixel was turned off this way.
+    /// Assumes x and y are within display bounds.
+    fn drawPixel(self: *Emulator, state: bool, x: u8, y: u8) void {
+        const pixel = @as(u32, y) * screen_width + x;
+        if (self.display[pixel] > 0 and !state) {
+            // Set VF
+            self.registers[0xF] = 1;
+        }
+        self.display[pixel] = 0xFF * @as(u8, @intFromBool(state));
+    }
+
+    fn screenToTexture(self: *Emulator) rl.Texture {
+        const screen = rl.Image{
+            .data = &self.display,
+            .width = screen_width,
+            .height = screen_height,
+            .mipmaps = 1,
+            .format = rl.PixelFormat.pixelformat_uncompressed_grayscale,
+        };
+        return rl.Texture.fromImage(screen);
     }
 };
 
 pub fn main() !void {
-    const screenWidth = 1280;
-    const screenHeight = 640;
+    const window_width = 1280;
+    const window_height = 800;
 
-    rl.initWindow(screenWidth, screenHeight, "ZCrisp Emulator");
+    var prng = std.rand.DefaultPrng.init(0);
+    var rand = prng.random();
+
+    rl.initWindow(window_width, window_height, "ZCrisp Emulator");
     defer rl.closeWindow();
 
     rl.setTargetFPS(60);
@@ -94,6 +149,7 @@ pub fn main() !void {
     var frameTimeText: []u8 = "";
 
     var emulator = Emulator.new();
+    const screen = emulator.screenToTexture();
 
     while (!rl.windowShouldClose()) {
         // Runs once each frame.
@@ -101,7 +157,7 @@ pub fn main() !void {
         defer rl.endDrawing();
 
         rl.clearBackground(rl.Color.white);
-        rl.drawText("Work in progress!", screenWidth / 2 - 100, screenHeight / 2 - 20, 20, rl.Color.black);
+        rl.drawText("Work in progress!", window_width / 2 - 100, 64, 20, rl.Color.black);
 
         frameClock +%= 1;
         const time = rl.getTime();
@@ -110,7 +166,7 @@ pub fn main() !void {
         recentFramesTotal -= recentFrameTimes[frameClock % 20];
         recentFrameTimes[frameClock % 20] = deltaTime;
         if (time > 0.6 and frameClock % 8 == 0) {
-            frameTimeText = try std.fmt.bufPrint(&frameTimeBuf, "Frame time: {d:.2} ms\n", .{recentFramesTotal / 20});
+            frameTimeText = try std.fmt.bufPrint(&frameTimeBuf, "Frame time: {d:.3} ms\n", .{recentFramesTotal / 20});
             frameTimeText[frameTimeText.len - 1] = 0;
         }
         rl.drawText(@ptrCast(frameTimeText), 10, 10, 20, rl.Color.dark_gray);
@@ -118,6 +174,16 @@ pub fn main() !void {
         // Emulator logic
 
         emulator.tick_timers();
+
+        const randX = rand.intRangeLessThan(u8, 0, screen_width);
+        const randY = rand.intRangeLessThan(u8, 0, screen_height);
+        emulator.drawPixel(true, randX, randY);
+        std.debug.print("\x1B[2K\r", .{}); // Clear the line
+        std.debug.print("Drawing pixel at ({d}, {d})", .{ randX, randY });
+
+        const scale = 16.0;
+        rl.updateTexture(screen, &emulator.display);
+        rl.drawTextureEx(screen, rl.Vector2{ .x = (window_width - screen_width * scale) / 2, .y = (window_height - screen_height * scale) / 2 }, 0.0, scale, rl.Color.dark_green);
     }
 }
 
@@ -173,4 +239,9 @@ test "instruction decode" {
     try expect(draw.Draw.regX == 0x2);
     try expect(draw.Draw.regY == 0x3);
     try expect(draw.Draw.height == 0x8);
+}
+
+test "draw pixel" {
+    var emulator = Emulator.new();
+    emulator.drawPixel(true, 20, 20);
 }
