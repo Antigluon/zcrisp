@@ -1,5 +1,6 @@
 const rl = @import("raylib");
 const std = @import("std");
+const fonts = @import("fonts");
 
 const screen_width = 64;
 const screen_height = 32;
@@ -60,9 +61,7 @@ const Emulator = struct {
     delay_timer: u8,
     sound_timer: u8,
 
-    fn new() Emulator {
-        var stack_mem = [_]u8{0} ** 16;
-        var stack_alloc = std.heap.FixedBufferAllocator.init(&stack_mem);
+    fn new(stack_allocator: std.mem.Allocator) Emulator {
         return Emulator{
             .memory = [_]u8{0x00} ** 4096,
             .display = [_]u8{0x00} ** display_size,
@@ -71,8 +70,12 @@ const Emulator = struct {
             .index = 0,
             .delay_timer = 0,
             .sound_timer = 0,
-            .stack = std.ArrayList(u16).init(stack_alloc.allocator()),
+            .stack = std.ArrayList(u16).init(stack_allocator),
         };
+    }
+
+    fn load_font(self: *Emulator, font: [64]u8) void {
+        std.mem.copyForwards(u8, self.memory[0x50..0x9F], font);
     }
 
     fn load_program(self: *Emulator, program: []const u8) !void {
@@ -167,7 +170,9 @@ pub fn main() !void {
     var recentFramesTotal: f32 = 0.0;
     var frameTimeText: []u8 = "";
 
-    var emulator = Emulator.new();
+    var stack_mem = [_]u8{0} ** 16;
+    var stack_alloc = std.heap.FixedBufferAllocator.init(&stack_mem);
+    var emulator = Emulator.new(stack_alloc.allocator());
     const screen = emulator.screenToTexture();
 
     while (!rl.windowShouldClose()) {
