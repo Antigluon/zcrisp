@@ -1,6 +1,6 @@
 const rl = @import("raylib");
 const std = @import("std");
-const fonts = @import("fonts");
+const fonts = @import("fonts.zig");
 
 const screen_width = 64;
 const screen_height = 32;
@@ -74,8 +74,8 @@ const Emulator = struct {
         };
     }
 
-    fn load_font(self: *Emulator, font: [64]u8) void {
-        std.mem.copyForwards(u8, self.memory[0x50..0x9F], font);
+    fn load_font(self: *Emulator, font: [80]u8) void {
+        std.mem.copyForwards(u8, self.memory[0x050..0x100], &font);
     }
 
     fn load_program(self: *Emulator, program: []const u8) !void {
@@ -150,6 +150,33 @@ const Emulator = struct {
         };
         return rl.Texture.fromImage(screen);
     }
+    /// Returns an ArrayList of bytes representing the memory as a hex dump.
+    /// The caller is responsible for freeing the memory.
+    fn hexDump(self: *Emulator, destAllocator: std.mem.Allocator) ![]u8 {
+        const row_width = 4;
+        const block_width = 2;
+        var output_buffer = std.ArrayList(u8).init(destAllocator);
+        const output_writer = output_buffer.writer();
+        for (0..(0x200 / (row_width * block_width))) |row| {
+            for (0..row_width) |block| {
+                const pos = row * row_width * block_width + block * block_width;
+                var block_data: [block_width]u8 = undefined;
+                std.mem.copyForwards(u8, &block_data, self.memory[pos .. pos + block_width]);
+                _ = try output_writer.write(&std.fmt.bytesToHex(block_data, std.fmt.Case.upper));
+                if (block < row_width - 1) {
+                    _ = try output_writer.write(" ");
+                } else {
+                    _ = try output_writer.write("\n");
+                }
+            }
+            // const pos = row * row_width;
+            // const row_data: [row_width]u8 = undefined;
+            // std.mem.copyForwards(u8, self.memory[pos .. pos + row_width], &row_data);
+            // std.debug.print("{s}\n", .{std.fmt.bytesToHex(row_data, std.fmt.Case.upper)});
+        }
+        // return std.fmt.allocPrintZ(allocator, "{x}", .{self.memory});
+        return output_buffer.toOwnedSlice();
+    }
 };
 
 pub fn main() !void {
@@ -173,6 +200,7 @@ pub fn main() !void {
     var stack_mem = [_]u8{0} ** 16;
     var stack_alloc = std.heap.FixedBufferAllocator.init(&stack_mem);
     var emulator = Emulator.new(stack_alloc.allocator());
+    emulator.load_font(fonts.default);
     const screen = emulator.screenToTexture();
 
     while (!rl.windowShouldClose()) {
@@ -212,6 +240,11 @@ pub fn main() !void {
             .y = (window_height - screen_height * scale) / 2,
         }, 0.0, scale, rl.Color.dark_green);
     }
+    std.debug.print("\n", .{});
+    const hex_dump_size = 16000;
+    var hexdump_buffer: [hex_dump_size]u8 = [_]u8{0} ** hex_dump_size;
+    var hexdump_allocator = std.heap.FixedBufferAllocator.init(&hexdump_buffer);
+    std.debug.print("{s}", .{try emulator.hexDump(hexdump_allocator.allocator())});
 }
 
 const expect = std.testing.expect;
