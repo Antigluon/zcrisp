@@ -150,7 +150,7 @@ const Emulator = struct {
         };
         return rl.Texture.fromImage(screen);
     }
-    /// Returns an ArrayList of bytes representing the memory as a hex dump.
+    /// Returns an owned slice of bytes representing the memory as a hex dump.
     /// The caller is responsible for freeing the memory.
     fn hexDump(self: *Emulator, destAllocator: std.mem.Allocator) ![]u8 {
         const row_width = 4;
