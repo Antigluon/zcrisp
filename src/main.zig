@@ -292,7 +292,10 @@ const Emulator = struct {
         .offset_jump_regX = false,
         .load_store_increment_index = false,
     },
+    rng: std.Random,
+
     fn new(stack_allocator: std.mem.Allocator) Emulator {
+        const rng = std.rand.DefaultPrng.init(8).random();
         return Emulator{
             .memory = [_]u8{0x00} ** 4096,
             .display = [_]u8{0x00} ** display_size,
@@ -302,6 +305,7 @@ const Emulator = struct {
             .delay_timer = 0,
             .sound_timer = 0,
             .stack = std.ArrayList(u16).init(stack_allocator),
+            .rng = rng,
         };
     }
 
@@ -434,9 +438,10 @@ const Emulator = struct {
                 }
                 self.pc = dest;
             },
-            // .Random => |instr| {
-            //     _ = instr;
-            // },
+            .Random => |instr| {
+                self.registers[instr.reg] =
+                    self.rng.intRangeAtMost(u8, 0, 0xFF) & instr.mask;
+            },
             .Draw => |instr| {
                 self.drawSprite(
                     self.index,
