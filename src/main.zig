@@ -89,9 +89,9 @@ fn decode_instruction(instruction_code: u16) !Instruction {
         },
         0x8 => switch (@as(u4, @truncate(instruction_code))) {
             0x0 => .{ // 8XY0
-                .Set = .{
-                    .reg = extractX(instruction_code),
-                    .val = extractY(instruction_code),
+                .SetRegister = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
                 },
             },
             0x1 => .{ // 8XY1
@@ -290,6 +290,10 @@ const key_map = [_]key{
     key.key_four, key.key_r, key.key_f, key.key_v, // CDEF
 };
 
+fn chipKeyDown(byte: u8) bool {
+    return rl.isKeyDown(key_map[byte & 0x0F]);
+}
+
 // const key_layout = [_]u8{
 //     0x1, 0x2, 0x3, 0xC,
 //     0x4, 0x5, 0x6, 0xD,
@@ -309,7 +313,7 @@ const Emulator = struct {
     quirks: Quirks = .{
         .shift_copy_y = false,
         .offset_jump_regX = false,
-        .load_store_increment_index = false,
+        .load_store_increment_index = true,
         .add_index_overflow_flag = false,
     },
     rng: std.Random,
@@ -433,8 +437,9 @@ const Emulator = struct {
                     self.registers[instr.regX] = self.registers[instr.regY];
                 }
                 // set VF to the least significant bit
-                self.registers[0xF] = self.registers[instr.regX] & 1;
+                const flag = self.registers[instr.regX] & 1;
                 self.registers[instr.regX] >>= 1;
+                self.registers[0xF] = flag;
             },
             .ShiftLeft => |instr| {
                 if (self.quirks.shift_copy_y) {
@@ -442,8 +447,9 @@ const Emulator = struct {
                     self.registers[instr.regX] = self.registers[instr.regY];
                 }
                 // set VF to the most significant bit
-                self.registers[0xF] = self.registers[instr.regX] >> 7;
+                const flag = self.registers[instr.regX] >> 7;
                 self.registers[instr.regX] <<= 1;
+                self.registers[0xF] = flag;
             },
             .SetIndex => |instr| self.index = instr.val,
             .OffsetJump => |instr| {
@@ -471,12 +477,12 @@ const Emulator = struct {
                 );
             },
             .SkipIfKey => |instr| {
-                if (rl.isKeyDown(key_map[self.registers[instr.reg]])) {
+                if (chipKeyDown(self.registers[instr.reg])) {
                     self.pc += 2;
                 }
             },
             .SkipIfNotKey => |instr| {
-                if (!rl.isKeyDown(key_map[self.registers[instr.reg]])) {
+                if (!chipKeyDown(self.registers[instr.reg])) {
                     self.pc += 2;
                 }
             },
@@ -498,7 +504,7 @@ const Emulator = struct {
             },
             .ReadInput => |instr| {
                 for (0..16) |i| {
-                    if (rl.isKeyDown(key_map[i])) {
+                    if (chipKeyDown(@truncate(i))) {
                         self.registers[instr.reg] = @truncate(i);
                         return;
                     }
@@ -507,24 +513,37 @@ const Emulator = struct {
                 self.pc -= 2;
             },
             .GetFontCharacter => |instr| {
-                self.index = 0x50 + @as(u16, self.registers[instr.reg]) * 5;
+                self.index = 0x50 + @as(u16, self.registers[instr.reg] & 0x0F) * 5;
             },
             .ConvertToDecimal => |instr| {
                 const val = self.registers[instr.reg];
                 self.memory[self.index] = val / 100;
+                if (self.index >= 4096 - 1) {
+                    return;
+                }
                 self.memory[self.index + 1] = (val / 10) % 10;
+                if (self.index >= 4096 - 2) {
+                    return;
+                }
                 self.memory[self.index + 2] = val % 10;
             },
             .Store => |instr| {
                 for (0..instr.reg + 1) |i| {
+                    if (self.index + i >= 4096) {
+                        continue;
+                    }
                     self.memory[self.index + i] = self.registers[i];
                 }
                 if (self.quirks.load_store_increment_index) {
-                    self.index += instr.reg + 1;
+                    self.index +%= instr.reg + 1;
                 }
             },
             .Load => |instr| {
                 for (0..instr.reg + 1) |i| {
+                    if (self.index + i >= 4096) {
+                        self.registers[i] = 0xFF;
+                        continue;
+                    }
                     self.registers[i] = self.memory[self.index + i];
                 }
                 if (self.quirks.load_store_increment_index) {
@@ -544,7 +563,11 @@ const Emulator = struct {
     }
 
     /// Retrieves the Nth bit of memory.
+    /// Returns 0 on out-of-bounds access.
     fn getBitValue(self: *Emulator, n: u16) u1 {
+        if (n >= self.memory.len * 8) {
+            return 0;
+        }
         const byte = n >> 3;
         const offset: u3 = @truncate(n % 8);
         const mask = @as(u8, 0b10000000) >> offset;
@@ -561,6 +584,10 @@ const Emulator = struct {
             var x: u8 = x_pos % screen_width;
             for (0..8) |col| {
                 const offset: u16 = @as(u16, @truncate(row)) * 8 + @as(u16, @truncate(col));
+                // const new_data_pos = sprite_ptr * 8 + offset;
+                // if (new_data_pos >= self.memory.len) {
+                //     break;
+                // }
                 const val = self.getBitValue(
                     sprite_ptr * 8 + offset,
                 );
@@ -679,7 +706,25 @@ pub fn main() !void {
     //std.debug.print("Sound loaded!\n", .{});
     // rl.playSound(tuning_fork);
 
-    const filename = "programs/BC_test.ch8";
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    const alloc = gpa.allocator();
+    var args = try std.process.argsWithAllocator(alloc);
+    defer args.deinit();
+    _ = args.next(); // Skip the program name
+    var maybe_filename: ?[]const u8 = null;
+    while (args.next()) |arg| {
+        if (maybe_filename == null) {
+            maybe_filename = arg;
+        }
+        std.debug.print("Argument: {s}\n", .{arg});
+    }
+    if (maybe_filename == null) {
+        std.debug.print("No filename provided.\n", .{});
+        return;
+    }
+    const filename = maybe_filename.?;
+
+    // const filename = "programs/BREAKOUT.ch8";
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fs.realpath(filename, &path_buf);
     const file = try std.fs.openFileAbsolute(path, .{});
