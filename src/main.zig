@@ -19,8 +19,15 @@ const Opcode = enum(u4) {
 fn decode_instruction(instructionCode: u16) !Instruction {
     const opcode: u4 = @truncate(instructionCode >> 12);
     return switch (opcode) {
-        0x0 => .{ .ClearScreen = {} },
+        0x0 => switch (@as(u8, @truncate(instructionCode))) {
+            0xE0 => .{ .ClearScreen = {} },
+            0xEE => .{ .Return = {} },
+            else => error.InvalidInstruction,
+        },
         0x1 => .{ .Jump = .{
+            .dest = @truncate(instructionCode),
+        } },
+        0x2 => .{ .Call = .{
             .dest = @truncate(instructionCode),
         } },
         0x6 => .{ .Set = .{
@@ -45,7 +52,9 @@ fn decode_instruction(instructionCode: u16) !Instruction {
 
 const Instruction = union(enum) {
     ClearScreen,
+    Return,
     Jump: struct { dest: u12 },
+    Call: struct { dest: u12 },
     Set: struct { reg: u4, val: u8 },
     Add: struct { reg: u4, val: u8 },
     SetIndex: struct { val: u12 },
@@ -92,13 +101,19 @@ const Emulator = struct {
     }
 
     /// Executes a decoded instruction.
-    fn execute_instruction(self: *Emulator, instruction: Instruction) void {
+    fn execute_instruction(self: *Emulator, instruction: Instruction) !void {
         // std.debug.print("{}\n", .{instruction});
         switch (instruction) {
             .ClearScreen => @memset(&self.display, 0),
+            .Return => {
+                self.pc = self.stack.popOrNull() orelse return error.NoContainingFrame;
+            },
             .Jump => |instr| {
                 self.pc = instr.dest;
-                // std.debug.print("Jumped to {x}\n", .{instr.dest});
+            },
+            .Call => |instr| {
+                try self.stack.append(self.pc); // already advanced
+                self.pc = @as(u16, instr.dest);
             },
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
@@ -110,13 +125,10 @@ const Emulator = struct {
                     self.registers[instr.regY],
                     instr.height,
                 );
-                // std.debug.print("Drawing {d} lines from {x} at ({d}, {d})\n", .{
-                //     instr.height,
-                //     self.index,
-                //     self.registers[instr.regX],
-                //     self.registers[instr.regY],
-                // });
             },
+            // else => {
+            //    error.UnimplementedInstruction
+            // },
         }
     }
 
@@ -125,7 +137,7 @@ const Emulator = struct {
         const instruction_code: u16 = (@as(u16, self.memory[self.pc]) << 8) + self.memory[self.pc + 1];
         // std.debug.print("{d}: {X}\n", .{ self.pc, instruction_code });
         self.pc += 2;
-        self.execute_instruction(try decode_instruction(instruction_code));
+        try self.execute_instruction(try decode_instruction(instruction_code));
     }
 
     /// Retrieves the Nth bit of memory.
@@ -220,7 +232,11 @@ fn formatHexDump(mem: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return output_buffer.toOwnedSlice();
 }
 
-const instructions_per_second = 800;
+const target_fps = 60;
+const target_frame_time = 1.0 / @as(f64, @floatFromInt(target_fps));
+
+const instructions_per_second = 700;
+// const instructions_per_second = 100 * std.math.pow(u64, 10, 6);
 const seconds_per_instruction: f64 = 1.0 /
     @as(f64, @floatFromInt(instructions_per_second));
 
@@ -234,7 +250,7 @@ pub fn main() !void {
     rl.initWindow(window_width, window_height, "ZCrisp Emulator");
     defer rl.closeWindow();
 
-    rl.setTargetFPS(60);
+    rl.setTargetFPS(target_fps);
 
     var recentFrameTimes: [20]f32 = [_]f32{0.0} ** 20;
     var frameClock: u8 = 0;
@@ -287,9 +303,14 @@ pub fn main() !void {
         // Emulator logic
 
         emulator.tick_timers();
-        while (seconds_to_simulate > 0) {
-            // std.debug.print("\x1B[2K\r", .{}); // Clear the line
-            // std.debug.print("Simulating {d:.2} ms ({d:.2} instructions)", .{ seconds_to_simulate * 1000, seconds_to_simulate / seconds_per_instruction });
+        std.debug.print("\x1B[2K\r", .{}); // Clear the line
+        if (seconds_to_simulate > 2 * target_frame_time) {
+            // out of sync
+            std.debug.print("(Overloaded by {d:.2} ms) ", .{seconds_to_simulate - target_frame_time});
+            seconds_to_simulate = target_frame_time;
+        }
+        std.debug.print("Simulating {d:.2} ms ({d:.0} instructions)", .{ seconds_to_simulate * 1000, seconds_to_simulate / seconds_per_instruction });
+        while (seconds_to_simulate > seconds_per_instruction) {
             try emulator.step();
             seconds_to_simulate -= seconds_per_instruction;
         }
