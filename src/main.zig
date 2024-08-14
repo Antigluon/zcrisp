@@ -16,36 +16,105 @@ const Opcode = enum(u4) {
     Draw = 0xD,
 };
 
-fn decode_instruction(instructionCode: u16) !Instruction {
-    const opcode: u4 = @truncate(instructionCode >> 12);
+fn extractNNN(instruction_code: u16) u12 {
+    return @truncate(instruction_code);
+}
+
+fn extractNN(instruction_code: u16) u8 {
+    return @truncate(instruction_code);
+}
+
+fn extractX(instruction_code: u16) u4 {
+    return @truncate(instruction_code >> 8);
+}
+
+fn extractY(instruction_code: u16) u4 {
+    return @truncate(instruction_code >> 4);
+}
+
+fn decode_instruction(instruction_code: u16) !Instruction {
+    const opcode: u4 = @truncate(instruction_code >> 12);
     return switch (opcode) {
-        0x0 => switch (@as(u8, @truncate(instructionCode))) {
-            0xE0 => .{ .ClearScreen = {} },
-            0xEE => .{ .Return = {} },
+        0x0 => switch (@as(u8, @truncate(instruction_code))) {
+            0xE0 => .{ .ClearScreen = {} }, // 00E0
+            0xEE => .{ .Return = {} }, // 00EE
             else => error.InvalidInstruction,
         },
-        0x1 => .{ .Jump = .{
-            .dest = @truncate(instructionCode),
-        } },
-        0x2 => .{ .Call = .{
-            .dest = @truncate(instructionCode),
-        } },
-        0x6 => .{ .Set = .{
-            .reg = @truncate(instructionCode >> 8),
-            .val = @truncate(instructionCode),
-        } },
-        0x7 => .{ .Add = .{
-            .reg = @truncate(instructionCode >> 8),
-            .val = @truncate(instructionCode),
-        } },
-        0xA => .{ .SetIndex = .{
-            .val = @truncate(instructionCode),
-        } },
-        0xD => .{ .Draw = .{
-            .regX = @truncate(instructionCode >> 8),
-            .regY = @truncate(instructionCode >> 4),
-            .height = @truncate(instructionCode),
-        } },
+        0x1 => .{
+            .Jump = .{ // 1NNN
+                .dest = extractNNN(instruction_code),
+            },
+        },
+        0x2 => .{
+            .Call = .{ // 2NNN
+                .dest = extractNNN(instruction_code),
+            },
+        },
+        0x3 => .{
+            .SkipEqual = .{ // 3XNN
+                .reg = extractX(instruction_code),
+                .val = extractNN(instruction_code),
+            },
+        },
+        0x4 => .{ // 4XNN
+
+            .SkipNotEqual = .{
+                .reg = extractX(instruction_code),
+                .val = extractNN(instruction_code),
+            },
+        },
+        0x5 => .{ // 5XY0
+            .SkipEqualRegister = .{
+                .regX = extractX(instruction_code),
+                .regY = extractY(instruction_code),
+            },
+        },
+        0x9 => .{ // 9XY0
+            .SkipNotEqualRegister = .{
+                .regX = extractX(instruction_code),
+                .regY = extractY(instruction_code),
+            },
+        },
+        0x6 => .{ // 6XNN
+            .Set = .{
+                .reg = extractX(instruction_code),
+                .val = extractNN(instruction_code),
+            },
+        },
+        0x7 => .{ // 7XNN
+            .Add = .{
+                .reg = extractX(instruction_code),
+                .val = extractNN(instruction_code),
+            },
+        },
+        0x8 => switch (@as(u4, @truncate(instruction_code))) {
+            0x0 => .{ // 8XY0
+                .Set = .{
+                    .reg = extractX(instruction_code),
+                    .val = extractY(instruction_code),
+                },
+            },
+            0x1 => .{ // 8XY1
+                .Or = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+            else => error.InvalidInstruction,
+        },
+        // 0x9 is earlier, with the other conditional skips.
+        0xA => .{ // ANNN
+            .SetIndex = .{
+                .val = @truncate(instruction_code),
+            },
+        },
+        0xD => .{ // DXYN
+            .Draw = .{
+                .regX = extractX(instruction_code),
+                .regY = extractY(instruction_code),
+                .height = @truncate(instruction_code),
+            },
+        },
         else => error.InvalidInstruction,
     };
 }
@@ -55,9 +124,34 @@ const Instruction = union(enum) {
     Return,
     Jump: struct { dest: u12 },
     Call: struct { dest: u12 },
+    SkipEqual: struct { reg: u4, val: u8 },
+    SkipNotEqual: struct { reg: u4, val: u8 },
+    SkipEqualRegister: struct { regX: u4, regY: u4 },
+    SkipNotEqualRegister: struct { regX: u4, regY: u4 },
     Set: struct { reg: u4, val: u8 },
     Add: struct { reg: u4, val: u8 },
+    SetRegister: struct { regX: u4, regY: u4 },
+    Or: struct { regX: u4, regY: u4 },
+    And: struct { regX: u4, regY: u4 },
+    Xor: struct { regX: u4, regY: u4 },
+    AddRegister: struct { regX: u4, regY: u4 },
+    SubtractY: struct { regX: u4, regY: u4 },
+    SubtractX: struct { regX: u4, regY: u4 },
+    ShiftRight: struct { regX: u4, regY: u4 },
+    ShiftLeft: struct { regX: u4, regY: u4 },
     SetIndex: struct { val: u12 },
+    OffsetJump: struct { val: u12 }, // Note: quirk affects layout.
+    Random: struct { regX: u4, mask: u8 },
+    SkipIfKey: struct { regX: u4 },
+    SkipIfNotKey: struct { regX: u4 },
+    ReadDelayTimer: struct { regX: u4 },
+    SetDelayTimer: struct { regX: u4 },
+    SetSoundTimer: struct { regX: u4 },
+    ReadInput: struct { regX: u4 },
+    GetCharacter: struct { regX: u4 },
+    ConvertToDecimal: struct { regX: u4 },
+    Store: struct { regX: u4 },
+    Load: struct { regX: u4 },
     Draw: struct { regX: u4, regY: u4, height: u4 },
 };
 
@@ -126,9 +220,7 @@ const Emulator = struct {
                     instr.height,
                 );
             },
-            // else => {
-            //    error.UnimplementedInstruction
-            // },
+            else => return error.UnimplementedInstruction,
         }
     }
 
