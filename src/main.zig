@@ -94,7 +94,7 @@ const Emulator = struct {
     fn execute_instruction(self: *Emulator, instruction: Instruction) void {
         // @panic("@ the disco");
         switch (instruction) {
-            .ClearScreen => @memset(self.display, 0),
+            .ClearScreen => @memset(&self.display, 0),
             .Jump => |instr| self.pc = instr.dest,
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
@@ -115,20 +115,43 @@ const Emulator = struct {
         self.execute_instruction(try decode_instruction(instruction_code));
     }
 
+    /// Retrieves the Nth bit of memory.
+    fn getBitValue(self: *Emulator, n: u16) u1 {
+        const byte = n >> 3;
+        const offset: u3 = @truncate(n % 8);
+        const mask = @as(u8, 0b10000000) >> offset;
+        return @intFromBool((self.memory[byte] & mask) > 0);
+    }
+
     /// Draws the 8xN pixel sprite at sprite_ptr onto the screen at (x_pos % 64, y_pos % 64). Sprite drawing will not wrap, except for the origin.
     /// After this operation, VF will be 1 if a pixel was turned off this way.
     /// Otherwise, it will be 0.
     fn drawSprite(self: *Emulator, sprite_ptr: u16, x_pos: u8, y_pos: u8, height: u8) void {
         var y: u8 = y_pos % screen_height;
+        var overwrote = false;
         for (0..height) |row| {
-            for (0..8) |_| {
-                var x = x_pos % screen_width;
-                _ = (y) * screen_width + x;
-                _ = self.memory(sprite_ptr) + row;
-                x += 1;
+            var x: u8 = x_pos % screen_width;
+            for (0..8) |col| {
+                const offset: u16 = @as(u16, @truncate(row)) * 8 + @as(u16, @truncate(col));
+                const val = self.getBitValue(
+                    sprite_ptr + offset,
+                );
+                // std.debug.print("{X}", .{val});
+                const flag = self.drawPixel(val > 0, x, y);
+                overwrote = flag or overwrote;
+                x +|= 1;
+                if (x >= screen_width) {
+                    break;
+                }
             }
-            y += 1;
+            // std.debug.print("\n", .{});
+            y +|= 1;
+            if (y >= screen_height) {
+                break;
+            }
         }
+        // Set VF
+        self.registers[0xF] = @intFromBool(overwrote);
     }
 
     /// Writes `state` to the pixel given by x and y.
@@ -175,6 +198,7 @@ fn formatHexDump(mem: []const u8, allocator: std.mem.Allocator) ![]u8 {
     }
     return output_buffer.toOwnedSlice();
 }
+
 pub fn main() !void {
     const window_width = 1600;
     const window_height = 960;
@@ -185,7 +209,7 @@ pub fn main() !void {
     rl.initWindow(window_width, window_height, "ZCrisp Emulator");
     defer rl.closeWindow();
 
-    rl.setTargetFPS(60);
+    rl.setTargetFPS(6);
 
     var recentFrameTimes: [20]f32 = [_]f32{0.0} ** 20;
     var frameClock: u8 = 0;
@@ -225,9 +249,11 @@ pub fn main() !void {
 
         const randX = rand.intRangeLessThan(u8, 0, screen_width);
         const randY = rand.intRangeLessThan(u8, 0, screen_height);
-        _ = emulator.drawPixel(true, randX, randY);
-        std.debug.print("\x1B[2K\r", .{}); // Clear the line
-        std.debug.print("Drawing pixel at ({d}, {d})", .{ randX, randY });
+        // _ = emulator.drawPixel(true, randX, randY);
+        emulator.execute_instruction(.{ .ClearScreen = {} });
+        std.debug.print("Drawing sprite at ({d}, {d})\n", .{ randX, randY });
+        emulator.drawSprite(0x050 * 8, randX, randY, 5);
+        // std.debug.print("\x1B[2K\r", .{}); // Clear the line
 
         const scale = 16.0;
         rl.updateTexture(screen, &emulator.display);
@@ -245,7 +271,7 @@ pub fn main() !void {
 
 const expect = std.testing.expect;
 test "program initialization" {
-    var emulator = Emulator.new();
+    var emulator = Emulator.new(std.testing.allocator);
     const ones: [0x200]u8 = [_]u8{0xFF} ** 0x200;
     try emulator.load_program(&ones);
     try expect(emulator.memory[0x000] == 0x00);
@@ -260,7 +286,7 @@ test "program initialization" {
 }
 
 test "timer tick" {
-    var emulator = Emulator.new();
+    var emulator = Emulator.new(std.testing.allocator);
     emulator.delay_timer = 10;
     emulator.sound_timer = 5;
     emulator.tick_timers();
@@ -298,6 +324,14 @@ test "instruction decode" {
 }
 
 test "draw pixel" {
-    var emulator = Emulator.new();
-    emulator.drawPixel(true, 20, 20);
+    var emulator = Emulator.new(std.testing.allocator);
+    try expect(false == emulator.drawPixel(true, 20, 20));
+}
+
+test "get bit value" {
+    var emulator = Emulator.new(std.testing.allocator);
+    const ones: [0x200]u8 = [_]u8{0xFF} ** 0x200;
+    try emulator.load_program(&ones);
+    try expect(emulator.getBitValue(0x250 * 8 + 1) == 1);
+    try expect(emulator.getBitValue(0x60 * 8 + 7) == 0);
 }
