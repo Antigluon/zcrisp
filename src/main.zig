@@ -483,6 +483,15 @@ const Emulator = struct {
                     self.pc += 2;
                 }
             },
+            .ReadDelayTimer => |instr| {
+                self.registers[instr.reg] = self.delay_timer;
+            },
+            .SetDelayTimer => |instr| {
+                self.delay_timer = self.registers[instr.reg];
+            },
+            .SetSoundTimer => |instr| {
+                self.sound_timer = self.registers[instr.reg];
+            },
             else => return error.UnimplementedInstruction,
         }
     }
