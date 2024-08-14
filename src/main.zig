@@ -278,6 +278,29 @@ const Quirks = struct {
     load_store_increment_index: bool,
 };
 
+const key = rl.KeyboardKey;
+
+const key_codes_layout = [_]key{
+    key.key_one, key.key_two, key.key_three, key.key_four,
+    key.key_q,   key.key_w,   key.key_e,     key.key_r,
+    key.key_a,   key.key_s,   key.key_d,     key.key_f,
+    key.key_z,   key.key_x,   key.key_c,     key.key_v,
+};
+
+const key_map = [_]key{
+    key.key_x, key.key_one, key.key_two, key.key_three, // 0123
+    key.key_q, key.key_w, key.key_e, key.key_a, // 4567
+    key.key_s, key.key_d, key.key_z, key.key_c, // 89AB
+    key.key_four, key.key_r, key.key_f, key.key_v, // CDEF
+};
+
+// const key_layout = [_]u8{
+//     0x1, 0x2, 0x3, 0xC,
+//     0x4, 0x5, 0x6, 0xD,
+//     0x7, 0x8, 0x9, 0xE,
+//     0xA, 0x0, 0xB, 0xF,
+// };
+
 const Emulator = struct {
     memory: [4096]u8,
     display: [display_size]u8,
@@ -295,7 +318,7 @@ const Emulator = struct {
     rng: std.Random,
 
     fn new(stack_allocator: std.mem.Allocator) Emulator {
-        const rng = std.rand.DefaultPrng.init(8).random();
+        var prng = std.rand.DefaultPrng.init(8);
         return Emulator{
             .memory = [_]u8{0x00} ** 4096,
             .display = [_]u8{0x00} ** display_size,
@@ -305,7 +328,7 @@ const Emulator = struct {
             .delay_timer = 0,
             .sound_timer = 0,
             .stack = std.ArrayList(u16).init(stack_allocator),
-            .rng = rng,
+            .rng = prng.random(),
         };
     }
 
@@ -361,7 +384,7 @@ const Emulator = struct {
                 }
             },
             .Set => |instr| self.registers[instr.reg] = instr.val,
-            .Add => |instr| self.registers[instr.reg] +|= instr.val,
+            .Add => |instr| self.registers[instr.reg] +%= instr.val,
             .SetRegister => |instr| {
                 self.registers[instr.regX] = self.registers[instr.regY];
             },
@@ -449,6 +472,16 @@ const Emulator = struct {
                     self.registers[instr.regY],
                     instr.height,
                 );
+            },
+            .SkipIfKey => |instr| {
+                if (rl.isKeyDown(key_map[self.registers[instr.reg]])) {
+                    self.pc += 2;
+                }
+            },
+            .SkipIfNotKey => |instr| {
+                if (!rl.isKeyDown(key_map[self.registers[instr.reg]])) {
+                    self.pc += 2;
+                }
             },
             else => return error.UnimplementedInstruction,
         }
