@@ -336,6 +336,26 @@ const Emulator = struct {
                 try self.stack.append(self.pc); // already advanced
                 self.pc = @as(u16, instr.dest);
             },
+            .SkipEqual => |instr| {
+                if (self.registers[instr.reg] == instr.val) {
+                    self.pc += 2;
+                }
+            },
+            .SkipNotEqual => |instr| {
+                if (self.registers[instr.reg] != instr.val) {
+                    self.pc += 2;
+                }
+            },
+            .SkipEqualRegister => |instr| {
+                if (self.registers[instr.regX] == self.registers[instr.regY]) {
+                    self.pc += 2;
+                }
+            },
+            .SkipNotEqualRegister => |instr| {
+                if (self.registers[instr.regX] != self.registers[instr.regY]) {
+                    self.pc += 2;
+                }
+            },
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
             .SetIndex => |instr| self.index = instr.val,
