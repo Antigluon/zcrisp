@@ -359,6 +359,69 @@ const Emulator = struct {
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
             .SetIndex => |instr| self.index = instr.val,
+            .SetRegister => |instr| {
+                self.registers[instr.regX] = self.registers[instr.regY];
+            },
+            .Or => |instr| {
+                self.registers[instr.regX] |= self.registers[instr.regY];
+            },
+            .And => |instr| {
+                self.registers[instr.regX] &= self.registers[instr.regY];
+            },
+            .Xor => |instr| {
+                self.registers[instr.regX] ^= self.registers[instr.regY];
+            },
+            .AddRegister => |instr| {
+                // I'm like 95% sure addWithOverflow does wrapping arithmetic
+                // but it could be evil
+                const result = @addWithOverflow(
+                    self.registers[instr.regX],
+                    self.registers[instr.regY],
+                );
+                self.registers[instr.regX] = result[0];
+                // set VF
+                self.registers[0xF] = @as(u8, result[1]);
+            },
+            .SubtractY => |instr| {
+                const result = @subWithOverflow(
+                    self.registers[instr.regX],
+                    self.registers[instr.regY],
+                );
+                self.registers[instr.regX] = result[0];
+                // invert the carry flag
+                // because the flags are backwards for subtraction
+                // then set VF
+                self.registers[0xF] = @as(u8, ~result[1]);
+            },
+            .SubtractX => |instr| {
+                const result = @subWithOverflow(
+                    self.registers[instr.regY],
+                    self.registers[instr.regX],
+                );
+                self.registers[instr.regX] = result[0];
+                // invert the carry flag
+                // because the flags are backwards for subtraction
+                // then set VF
+                self.registers[0xF] = @as(u8, ~result[1]);
+            },
+            .ShiftRight => |instr| {
+                if (self.quirks.shift_copy_y) {
+                    // copy VY to VX before shifting
+                    self.registers[instr.regX] = self.registers[instr.regY];
+                }
+                // set VF to the least significant bit
+                self.registers[0xF] = self.registers[instr.regX] & 1;
+                self.registers[instr.regX] >>= 1;
+            },
+            .ShiftLeft => |instr| {
+                if (self.quirks.shift_copy_y) {
+                    // copy VY to VX before shifting
+                    self.registers[instr.regX] = self.registers[instr.regY];
+                }
+                // set VF to the most significant bit
+                self.registers[0xF] = self.registers[instr.regX] >> 7;
+                self.registers[instr.regX] <<= 1;
+            },
             .Draw => |instr| {
                 self.drawSprite(
                     self.index,
