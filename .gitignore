@@ -21,4 +21,5 @@ zig-out/
 # releases to make it less annoying to work with multiple branches.
 zig-cache/
 
-
+# don't have the rights to distribute some of these files
+programs/

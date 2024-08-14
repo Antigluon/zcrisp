@@ -294,6 +294,10 @@ fn chipKeyDown(byte: u8) bool {
     return rl.isKeyDown(key_map[byte & 0x0F]);
 }
 
+fn chipKeyReleased(byte: u8) bool {
+    return rl.isKeyReleased(key_map[byte & 0x0F]);
+}
+
 // const key_layout = [_]u8{
 //     0x1, 0x2, 0x3, 0xC,
 //     0x4, 0x5, 0x6, 0xD,
@@ -319,7 +323,7 @@ const Emulator = struct {
     rng: std.Random,
 
     fn new(stack_allocator: std.mem.Allocator) Emulator {
-        var prng = std.rand.DefaultPrng.init(8);
+        var prng = std.crypto.random;
         return Emulator{
             .memory = [_]u8{0x00} ** 4096,
             .display = [_]u8{0x00} ** display_size,
@@ -504,7 +508,7 @@ const Emulator = struct {
             },
             .ReadInput => |instr| {
                 for (0..16) |i| {
-                    if (chipKeyDown(@truncate(i))) {
+                    if (chipKeyReleased(@truncate(i))) {
                         self.registers[instr.reg] = @truncate(i);
                         return;
                     }
@@ -528,18 +532,18 @@ const Emulator = struct {
                 self.memory[self.index + 2] = val % 10;
             },
             .Store => |instr| {
-                for (0..instr.reg + 1) |i| {
+                for (0..instr.reg +| 1) |i| {
                     if (self.index + i >= 4096) {
                         continue;
                     }
                     self.memory[self.index + i] = self.registers[i];
                 }
                 if (self.quirks.load_store_increment_index) {
-                    self.index +%= instr.reg + 1;
+                    self.index +%= @as(u16, instr.reg) + 1;
                 }
             },
             .Load => |instr| {
-                for (0..instr.reg + 1) |i| {
+                for (0..instr.reg +| 1) |i| {
                     if (self.index + i >= 4096) {
                         self.registers[i] = 0xFF;
                         continue;
@@ -547,7 +551,7 @@ const Emulator = struct {
                     self.registers[i] = self.memory[self.index + i];
                 }
                 if (self.quirks.load_store_increment_index) {
-                    self.index += instr.reg + 1;
+                    self.index +%= @as(u16, instr.reg) + 1;
                 }
             },
             // else => return error.UnimplementedInstruction,
