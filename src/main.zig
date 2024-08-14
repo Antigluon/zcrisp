@@ -699,7 +699,7 @@ pub fn main() !void {
                 rl.playSound(tuning_fork);
                 last_frame_sound = emulator.sound_timer;
             }
-        } else if (rl.isSoundPlaying(tuning_fork)) {
+        } else {
             rl.stopSound(tuning_fork);
             last_frame_sound = 0;
         }
