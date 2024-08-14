@@ -358,7 +358,6 @@ const Emulator = struct {
             },
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
-            .SetIndex => |instr| self.index = instr.val,
             .SetRegister => |instr| {
                 self.registers[instr.regX] = self.registers[instr.regY];
             },
@@ -422,6 +421,22 @@ const Emulator = struct {
                 self.registers[0xF] = self.registers[instr.regX] >> 7;
                 self.registers[instr.regX] <<= 1;
             },
+            .SetIndex => |instr| self.index = instr.val,
+            .OffsetJump => |instr| {
+                const payload = @as(u16, instr.val);
+                var dest: u16 = undefined;
+                if (self.quirks.offset_jump_regX) {
+                    // VX + NN
+                    dest = self.registers[extractX(payload)] + extractNN(payload);
+                } else {
+                    // V0 + NNN
+                    dest = @as(u16, self.registers[0]) + payload;
+                }
+                self.pc = dest;
+            },
+            // .Random => |instr| {
+            //     _ = instr;
+            // },
             .Draw => |instr| {
                 self.drawSprite(
                     self.index,
