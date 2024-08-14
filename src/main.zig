@@ -115,6 +115,9 @@ const Emulator = struct {
         self.execute_instruction(try decode_instruction(instruction_code));
     }
 
+    /// Draws the 8xN pixel sprite at sprite_ptr onto the screen at (x_pos % 64, y_pos % 64). Sprite drawing will not wrap, except for the origin.
+    /// After this operation, VF will be 1 if a pixel was turned off this way.
+    /// Otherwise, it will be 0.
     fn drawSprite(self: *Emulator, sprite_ptr: u16, x_pos: u8, y_pos: u8, height: u8) void {
         var y: u8 = y_pos % screen_height;
         for (0..height) |row| {
@@ -129,15 +132,13 @@ const Emulator = struct {
     }
 
     /// Writes `state` to the pixel given by x and y.
-    /// Sets VF <- 1 if a pixel was turned off this way.
+    /// Returns true iff a pixel was turned off this way.
     /// Assumes x and y are within display bounds.
-    fn drawPixel(self: *Emulator, state: bool, x: u8, y: u8) void {
+    fn drawPixel(self: *Emulator, state: bool, x: u8, y: u8) bool {
         const pixel = @as(u32, y) * screen_width + x;
-        if (self.display[pixel] > 0 and !state) {
-            // Set VF
-            self.registers[0xF] = 1;
-        }
+        const flag = (self.display[pixel] > 0 and !state);
         self.display[pixel] = 0xFF * @as(u8, @intFromBool(state));
+        return flag;
     }
 
     fn screenToTexture(self: *Emulator) rl.Texture {
@@ -150,35 +151,30 @@ const Emulator = struct {
         };
         return rl.Texture.fromImage(screen);
     }
-    /// Returns an owned slice of bytes representing the memory as a hex dump.
-    /// The caller is responsible for freeing the memory.
-    fn hexDump(self: *Emulator, destAllocator: std.mem.Allocator) ![]u8 {
-        const row_width = 4;
-        const block_width = 2;
-        var output_buffer = std.ArrayList(u8).init(destAllocator);
-        const output_writer = output_buffer.writer();
-        for (0..(0x200 / (row_width * block_width))) |row| {
-            for (0..row_width) |block| {
-                const pos = row * row_width * block_width + block * block_width;
-                var block_data: [block_width]u8 = undefined;
-                std.mem.copyForwards(u8, &block_data, self.memory[pos .. pos + block_width]);
-                _ = try output_writer.write(&std.fmt.bytesToHex(block_data, std.fmt.Case.upper));
-                if (block < row_width - 1) {
-                    _ = try output_writer.write(" ");
-                } else {
-                    _ = try output_writer.write("\n");
-                }
-            }
-            // const pos = row * row_width;
-            // const row_data: [row_width]u8 = undefined;
-            // std.mem.copyForwards(u8, self.memory[pos .. pos + row_width], &row_data);
-            // std.debug.print("{s}\n", .{std.fmt.bytesToHex(row_data, std.fmt.Case.upper)});
-        }
-        // return std.fmt.allocPrintZ(allocator, "{x}", .{self.memory});
-        return output_buffer.toOwnedSlice();
-    }
 };
-
+/// Returns an owned slice of bytes representing the memory as a hex dump.
+/// The caller is responsible for freeing the memory with allocator.free(result).
+fn formatHexDump(mem: []const u8, allocator: std.mem.Allocator) ![]u8 {
+    const row_width = 4;
+    const block_width = 2;
+    var output_buffer = std.ArrayList(u8).init(allocator);
+    errdefer output_buffer.deinit();
+    const output_writer = output_buffer.writer();
+    for (0..(mem.len / (row_width * block_width))) |row| {
+        for (0..row_width) |block| {
+            const pos = row * row_width * block_width + block * block_width;
+            var block_data: [block_width]u8 = undefined;
+            std.mem.copyForwards(u8, &block_data, mem[pos .. pos + block_width]);
+            _ = try output_writer.write(&std.fmt.bytesToHex(block_data, std.fmt.Case.upper));
+            if (block < row_width - 1) {
+                _ = try output_writer.write(" ");
+            } else {
+                _ = try output_writer.write("\n");
+            }
+        }
+    }
+    return output_buffer.toOwnedSlice();
+}
 pub fn main() !void {
     const window_width = 1600;
     const window_height = 960;
@@ -229,7 +225,7 @@ pub fn main() !void {
 
         const randX = rand.intRangeLessThan(u8, 0, screen_width);
         const randY = rand.intRangeLessThan(u8, 0, screen_height);
-        emulator.drawPixel(true, randX, randY);
+        _ = emulator.drawPixel(true, randX, randY);
         std.debug.print("\x1B[2K\r", .{}); // Clear the line
         std.debug.print("Drawing pixel at ({d}, {d})", .{ randX, randY });
 
@@ -244,7 +240,7 @@ pub fn main() !void {
     const hex_dump_size = 16000;
     var hexdump_buffer: [hex_dump_size]u8 = [_]u8{0} ** hex_dump_size;
     var hexdump_allocator = std.heap.FixedBufferAllocator.init(&hexdump_buffer);
-    std.debug.print("{s}", .{try emulator.hexDump(hexdump_allocator.allocator())});
+    std.debug.print("{s}", .{try formatHexDump(emulator.memory[0x050..0x090], hexdump_allocator.allocator())});
 }
 
 const expect = std.testing.expect;
