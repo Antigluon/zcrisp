@@ -114,7 +114,7 @@ fn decode_instruction(instruction_code: u16) !Instruction {
                 },
             },
             0x4 => .{ // 8XY4
-                .AddReg = .{
+                .AddRegister = .{
                     .regX = extractX(instruction_code),
                     .regY = extractY(instruction_code),
                 },
@@ -149,7 +149,18 @@ fn decode_instruction(instruction_code: u16) !Instruction {
         // 0x9 is earlier, with the other conditional skips.
         0xA => .{ // ANNN
             .SetIndex = .{
-                .val = @truncate(instruction_code),
+                .val = extractNNN(instruction_code),
+            },
+        },
+        0xB => .{ // BNNN
+            .OffsetJump = .{
+                .val = extractNNN(instruction_code),
+            },
+        },
+        0xC => .{ // CXNN
+            .Random = .{
+                .reg = extractX(instruction_code),
+                .mask = extractNN(instruction_code),
             },
         },
         0xD => .{ // DXYN
@@ -158,6 +169,19 @@ fn decode_instruction(instruction_code: u16) !Instruction {
                 .regY = extractY(instruction_code),
                 .height = @truncate(instruction_code),
             },
+        },
+        0xE => switch (@as(u8, @truncate(instruction_code))) {
+            0x9E => .{ // EX9E
+                .SkipIfKey = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0xA1 => .{ // EXA1
+                .SkipIfNotKey = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            else => error.InvalidInstruction,
         },
         else => error.InvalidInstruction,
     };
@@ -185,18 +209,18 @@ const Instruction = union(enum) {
     ShiftLeft: struct { regX: u4, regY: u4 },
     SetIndex: struct { val: u12 },
     OffsetJump: struct { val: u12 }, // Note: quirk affects layout.
-    Random: struct { regX: u4, mask: u8 },
-    SkipIfKey: struct { regX: u4 },
-    SkipIfNotKey: struct { regX: u4 },
-    ReadDelayTimer: struct { regX: u4 },
-    SetDelayTimer: struct { regX: u4 },
-    SetSoundTimer: struct { regX: u4 },
-    ReadInput: struct { regX: u4 },
-    GetCharacter: struct { regX: u4 },
-    ConvertToDecimal: struct { regX: u4 },
-    Store: struct { regX: u4 },
-    Load: struct { regX: u4 },
+    Random: struct { reg: u4, mask: u8 },
     Draw: struct { regX: u4, regY: u4, height: u4 },
+    SkipIfKey: struct { reg: u4 },
+    SkipIfNotKey: struct { reg: u4 },
+    ReadDelayTimer: struct { reg: u4 },
+    SetDelayTimer: struct { reg: u4 },
+    SetSoundTimer: struct { reg: u4 },
+    ReadInput: struct { reg: u4 },
+    GetCharacter: struct { reg: u4 },
+    ConvertToDecimal: struct { reg: u4 },
+    Store: struct { reg: u4 },
+    Load: struct { reg: u4 },
 };
 
 const Emulator = struct {
