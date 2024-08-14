@@ -5,6 +5,7 @@ const fonts = @import("fonts.zig");
 const screen_width = 64;
 const screen_height = 32;
 const display_size = screen_width * screen_height;
+const max_program_size = 4096 - 512;
 
 const Opcode = enum(u4) {
     ClearScreen = 0x0,
@@ -78,7 +79,7 @@ const Emulator = struct {
         std.mem.copyForwards(u8, self.memory[0x050..0x100], &font);
     }
 
-    fn load_program(self: *Emulator, program: []const u8) !void {
+    fn loadProgram(self: *Emulator, program: []const u8) !void {
         if (program.len > self.memory.len - 0x200) {
             return error.OutofMemory;
         }
@@ -92,25 +93,37 @@ const Emulator = struct {
 
     /// Executes a decoded instruction.
     fn execute_instruction(self: *Emulator, instruction: Instruction) void {
-        // @panic("@ the disco");
+        // std.debug.print("{}\n", .{instruction});
         switch (instruction) {
             .ClearScreen => @memset(&self.display, 0),
-            .Jump => |instr| self.pc = instr.dest,
+            .Jump => |instr| {
+                self.pc = instr.dest;
+                // std.debug.print("Jumped to {x}\n", .{instr.dest});
+            },
             .Set => |instr| self.registers[instr.reg] = instr.val,
             .Add => |instr| self.registers[instr.reg] +|= instr.val,
             .SetIndex => |instr| self.index = instr.val,
-            .Draw => |instr| self.drawSprite(
-                self.memory[self.index],
-                self.registers[instr.regX],
-                self.registers[instr.regY],
-                instr.height,
-            ),
+            .Draw => |instr| {
+                self.drawSprite(
+                    self.index,
+                    self.registers[instr.regX],
+                    self.registers[instr.regY],
+                    instr.height,
+                );
+                // std.debug.print("Drawing {d} lines from {x} at ({d}, {d})\n", .{
+                //     instr.height,
+                //     self.index,
+                //     self.registers[instr.regX],
+                //     self.registers[instr.regY],
+                // });
+            },
         }
     }
 
     /// Decodes and executes the instruction at `self.pc`, advancing the program counter as applicable.
     fn step(self: *Emulator) !void {
-        const instruction_code = self.memory[self.pc];
+        const instruction_code: u16 = (@as(u16, self.memory[self.pc]) << 8) + self.memory[self.pc + 1];
+        // std.debug.print("{d}: {X}\n", .{ self.pc, instruction_code });
         self.pc += 2;
         self.execute_instruction(try decode_instruction(instruction_code));
     }
@@ -134,11 +147,13 @@ const Emulator = struct {
             for (0..8) |col| {
                 const offset: u16 = @as(u16, @truncate(row)) * 8 + @as(u16, @truncate(col));
                 const val = self.getBitValue(
-                    sprite_ptr + offset,
+                    sprite_ptr * 8 + offset,
                 );
                 // std.debug.print("{X}", .{val});
-                const flag = self.drawPixel(val > 0, x, y);
-                overwrote = flag or overwrote;
+                if (val > 0) {
+                    const flag = self.flipPixel(x, y);
+                    overwrote = flag or overwrote;
+                }
                 x +|= 1;
                 if (x >= screen_width) {
                     break;
@@ -154,13 +169,13 @@ const Emulator = struct {
         self.registers[0xF] = @intFromBool(overwrote);
     }
 
-    /// Writes `state` to the pixel given by x and y.
+    /// Inverts the pixel given by x and y.
     /// Returns true iff a pixel was turned off this way.
     /// Assumes x and y are within display bounds.
-    fn drawPixel(self: *Emulator, state: bool, x: u8, y: u8) bool {
+    fn flipPixel(self: *Emulator, x: u8, y: u8) bool {
         const pixel = @as(u32, y) * screen_width + x;
-        const flag = (self.display[pixel] > 0 and !state);
-        self.display[pixel] = 0xFF * @as(u8, @intFromBool(state));
+        const flag = (self.display[pixel] > 0);
+        self.display[pixel] = ~self.display[pixel];
         return flag;
     }
 
@@ -173,6 +188,12 @@ const Emulator = struct {
             .format = rl.PixelFormat.pixelformat_uncompressed_grayscale,
         };
         return rl.Texture.fromImage(screen);
+    }
+
+    fn readProgramFromFile(self: *Emulator, file: std.fs.File) !void {
+        var content_buf: [3584]u8 = undefined;
+        const program_length = try file.readAll(&content_buf);
+        try self.loadProgram(content_buf[0..program_length]);
     }
 };
 /// Returns an owned slice of bytes representing the memory as a hex dump.
@@ -199,17 +220,21 @@ fn formatHexDump(mem: []const u8, allocator: std.mem.Allocator) ![]u8 {
     return output_buffer.toOwnedSlice();
 }
 
+const instructions_per_second = 800;
+const seconds_per_instruction: f64 = 1.0 /
+    @as(f64, @floatFromInt(instructions_per_second));
+
 pub fn main() !void {
     const window_width = 1600;
     const window_height = 960;
 
-    var prng = std.rand.DefaultPrng.init(0);
-    var rand = prng.random();
+    // var prng = std.rand.DefaultPrng.init(0);
+    // var rand = prng.random();
 
     rl.initWindow(window_width, window_height, "ZCrisp Emulator");
     defer rl.closeWindow();
 
-    rl.setTargetFPS(6);
+    rl.setTargetFPS(60);
 
     var recentFrameTimes: [20]f32 = [_]f32{0.0} ** 20;
     var frameClock: u8 = 0;
@@ -223,6 +248,21 @@ pub fn main() !void {
     emulator.load_font(fonts.default);
     const screen = emulator.screenToTexture();
 
+    const filename = "programs/ibm-logo.ch8";
+    var path_buf: [std.fs.max_path_bytes]u8 = undefined;
+    const path = try std.fs.realpath(filename, &path_buf);
+    const file = try std.fs.openFileAbsolute(path, .{});
+    defer file.close();
+    try emulator.readProgramFromFile(file);
+
+    std.debug.print("\n", .{});
+    const hex_dump_size = 16000;
+    var hexdump_buffer: [hex_dump_size]u8 = [_]u8{0} ** hex_dump_size;
+    var hexdump_allocator = std.heap.FixedBufferAllocator.init(&hexdump_buffer);
+    std.debug.print("{s}", .{try formatHexDump(emulator.memory[0x0200..0x0250], hexdump_allocator.allocator())});
+
+    var seconds_to_simulate: f64 = 0.0;
+
     while (!rl.windowShouldClose()) {
         // Runs once each frame.
         rl.beginDrawing();
@@ -233,6 +273,7 @@ pub fn main() !void {
 
         frameClock +%= 1;
         const time = rl.getTime();
+        seconds_to_simulate += rl.getFrameTime();
         const deltaTime = rl.getFrameTime() * 1000; // milliseconds
         recentFramesTotal += deltaTime;
         recentFramesTotal -= recentFrameTimes[frameClock % 20];
@@ -246,13 +287,19 @@ pub fn main() !void {
         // Emulator logic
 
         emulator.tick_timers();
+        while (seconds_to_simulate > 0) {
+            // std.debug.print("\x1B[2K\r", .{}); // Clear the line
+            // std.debug.print("Simulating {d:.2} ms ({d:.2} instructions)", .{ seconds_to_simulate * 1000, seconds_to_simulate / seconds_per_instruction });
+            try emulator.step();
+            seconds_to_simulate -= seconds_per_instruction;
+        }
 
-        const randX = rand.intRangeLessThan(u8, 0, screen_width);
-        const randY = rand.intRangeLessThan(u8, 0, screen_height);
+        // const randX = rand.intRangeLessThan(u8, 0, screen_width);
+        // const randY = rand.intRangeLessThan(u8, 0, screen_height);
+        // std.debug.print("Drawing sprite at ({d}, {d})\n", .{ randX, randY });
         // _ = emulator.drawPixel(true, randX, randY);
-        emulator.execute_instruction(.{ .ClearScreen = {} });
-        std.debug.print("Drawing sprite at ({d}, {d})\n", .{ randX, randY });
-        emulator.drawSprite(0x050 * 8, randX, randY, 5);
+        // emulator.execute_instruction(.{ .ClearScreen = {} });
+        // emulator.drawSprite(0x050 * 8, 28, 13, 5);
         // std.debug.print("\x1B[2K\r", .{}); // Clear the line
 
         const scale = 16.0;
@@ -263,17 +310,17 @@ pub fn main() !void {
         }, 0.0, scale, rl.Color.dark_green);
     }
     std.debug.print("\n", .{});
-    const hex_dump_size = 16000;
-    var hexdump_buffer: [hex_dump_size]u8 = [_]u8{0} ** hex_dump_size;
-    var hexdump_allocator = std.heap.FixedBufferAllocator.init(&hexdump_buffer);
-    std.debug.print("{s}", .{try formatHexDump(emulator.memory[0x050..0x090], hexdump_allocator.allocator())});
+    // const hex_dump_size = 16000;
+    // var hexdump_buffer: [hex_dump_size]u8 = [_]u8{0} ** hex_dump_size;
+    // var hexdump_allocator = std.heap.FixedBufferAllocator.init(&hexdump_buffer);
+    // std.debug.print("{s}", .{try formatHexDump(emulator.memory[0x0200..0x0250], hexdump_allocator.allocator())});
 }
 
 const expect = std.testing.expect;
 test "program initialization" {
     var emulator = Emulator.new(std.testing.allocator);
     const ones: [0x200]u8 = [_]u8{0xFF} ** 0x200;
-    try emulator.load_program(&ones);
+    try emulator.loadProgram(&ones);
     try expect(emulator.memory[0x000] == 0x00);
     try expect(emulator.memory[0x100] == 0x00);
     try expect(emulator.memory[0x200] == 0xFF);
@@ -282,7 +329,7 @@ test "program initialization" {
     try expect(emulator.memory[0x400] == 0x00);
 
     const tooLong = [_]u8{0x00} ** 0x2000;
-    try expect(emulator.load_program(&tooLong) == error.OutofMemory);
+    try expect(emulator.loadProgram(&tooLong) == error.OutofMemory);
 }
 
 test "timer tick" {
@@ -325,13 +372,13 @@ test "instruction decode" {
 
 test "draw pixel" {
     var emulator = Emulator.new(std.testing.allocator);
-    try expect(false == emulator.drawPixel(true, 20, 20));
+    try expect(false == emulator.flipPixel(true, 20, 20));
 }
 
 test "get bit value" {
     var emulator = Emulator.new(std.testing.allocator);
     const ones: [0x200]u8 = [_]u8{0xFF} ** 0x200;
-    try emulator.load_program(&ones);
+    try emulator.loadProgram(&ones);
     try expect(emulator.getBitValue(0x250 * 8 + 1) == 1);
     try expect(emulator.getBitValue(0x60 * 8 + 7) == 0);
 }
