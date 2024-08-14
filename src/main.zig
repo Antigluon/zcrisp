@@ -628,6 +628,18 @@ pub fn main() !void {
     emulator.load_font(fonts.default);
     const screen = emulator.screenToTexture();
 
+    // ** audio **
+    rl.initAudioDevice();
+    defer rl.closeAudioDevice();
+    std.debug.print("Waiting for sound to load...\n", .{});
+    const tuning_fork = rl.loadSound("resources/tuning_fork.ogg");
+    defer rl.unloadSound(tuning_fork);
+    var last_frame_sound: u16 = 0;
+
+    while (!rl.isSoundReady(tuning_fork)) {}
+    //std.debug.print("Sound loaded!\n", .{});
+    // rl.playSound(tuning_fork);
+
     const filename = "programs/ibm-logo.ch8";
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fs.realpath(filename, &path_buf);
@@ -663,6 +675,10 @@ pub fn main() !void {
             frameTimeText[frameTimeText.len - 1] = 0;
         }
         rl.drawText(@ptrCast(frameTimeText), 10, 10, 20, rl.Color.dark_gray);
+        // if (frameClock % 128 == 0) {
+        //     std.debug.print("\nDing!\n", .{});
+        //     emulator.sound_timer = 60;
+        // }
 
         // Emulator logic
 
@@ -677,6 +693,15 @@ pub fn main() !void {
         while (seconds_to_simulate > seconds_per_instruction) {
             try emulator.step();
             seconds_to_simulate -= seconds_per_instruction;
+        }
+        if (emulator.sound_timer > 0) {
+            if (last_frame_sound < emulator.sound_timer) {
+                rl.playSound(tuning_fork);
+                last_frame_sound = emulator.sound_timer;
+            }
+        } else if (rl.isSoundPlaying(tuning_fork)) {
+            rl.stopSound(tuning_fork);
+            last_frame_sound = 0;
         }
 
         // const randX = rand.intRangeLessThan(u8, 0, screen_width);
