@@ -231,7 +231,7 @@ fn decode_instruction(instruction_code: u16) !Instruction {
             },
             else => error.InvalidInstruction,
         },
-        else => error.InvalidInstruction,
+        // else => error.InvalidInstruction,
     };
 }
 
@@ -272,6 +272,12 @@ const Instruction = union(enum) {
     Load: struct { reg: u4 },
 };
 
+const Quirks = struct {
+    shift_copy_y: bool,
+    offset_jump_regX: bool,
+    load_store_increment_index: bool,
+};
+
 const Emulator = struct {
     memory: [4096]u8,
     display: [display_size]u8,
@@ -281,7 +287,11 @@ const Emulator = struct {
     registers: [16]u8,
     delay_timer: u8,
     sound_timer: u8,
-
+    quirks: Quirks = .{
+        .shift_copy_y = false,
+        .offset_jump_regX = false,
+        .load_store_increment_index = false,
+    },
     fn new(stack_allocator: std.mem.Allocator) Emulator {
         return Emulator{
             .memory = [_]u8{0x00} ** 4096,
