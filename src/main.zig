@@ -210,7 +210,7 @@ fn decode_instruction(instruction_code: u16) !Instruction {
                 },
             },
             0x29 => .{ // FX29
-                .GetCharacter = .{
+                .GetFontCharacter = .{
                     .reg = extractX(instruction_code),
                 },
             },
@@ -266,17 +266,13 @@ const Instruction = union(enum) {
     SetSoundTimer: struct { reg: u4 },
     ReadInput: struct { reg: u4 },
     AddIndex: struct { reg: u4 },
-    GetCharacter: struct { reg: u4 },
+    GetFontCharacter: struct { reg: u4 },
     ConvertToDecimal: struct { reg: u4 },
     Store: struct { reg: u4 },
     Load: struct { reg: u4 },
 };
 
-const Quirks = struct {
-    shift_copy_y: bool,
-    offset_jump_regX: bool,
-    load_store_increment_index: bool,
-};
+const Quirks = struct { shift_copy_y: bool, offset_jump_regX: bool, load_store_increment_index: bool, add_index_overflow_flag: bool };
 
 const key = rl.KeyboardKey;
 
@@ -314,6 +310,7 @@ const Emulator = struct {
         .shift_copy_y = false,
         .offset_jump_regX = false,
         .load_store_increment_index = false,
+        .add_index_overflow_flag = false,
     },
     rng: std.Random,
 
@@ -492,7 +489,49 @@ const Emulator = struct {
             .SetSoundTimer => |instr| {
                 self.sound_timer = self.registers[instr.reg];
             },
-            else => return error.UnimplementedInstruction,
+            .AddIndex => |instr| {
+                self.index +%= @as(u16, self.registers[instr.reg]);
+                if (self.quirks.add_index_overflow_flag) {
+                    // set VF based on "overflow"
+                    self.registers[0xF] = @intFromBool(self.index > 0x1000);
+                }
+            },
+            .ReadInput => |instr| {
+                for (0..16) |i| {
+                    if (rl.isKeyDown(key_map[i])) {
+                        self.registers[instr.reg] = @truncate(i);
+                        return;
+                    }
+                }
+                // No key pressed - jump back to this instruction.
+                self.pc -= 2;
+            },
+            .GetFontCharacter => |instr| {
+                self.index = 0x50 + @as(u16, self.registers[instr.reg]) * 5;
+            },
+            .ConvertToDecimal => |instr| {
+                const val = self.registers[instr.reg];
+                self.memory[self.index] = val / 100;
+                self.memory[self.index + 1] = (val / 10) % 10;
+                self.memory[self.index + 2] = val % 10;
+            },
+            .Store => |instr| {
+                for (0..instr.reg + 1) |i| {
+                    self.memory[self.index + i] = self.registers[i];
+                }
+                if (self.quirks.load_store_increment_index) {
+                    self.index += instr.reg + 1;
+                }
+            },
+            .Load => |instr| {
+                for (0..instr.reg + 1) |i| {
+                    self.registers[i] = self.memory[self.index + i];
+                }
+                if (self.quirks.load_store_increment_index) {
+                    self.index += instr.reg + 1;
+                }
+            },
+            // else => return error.UnimplementedInstruction,
         }
     }
 
@@ -640,7 +679,7 @@ pub fn main() !void {
     //std.debug.print("Sound loaded!\n", .{});
     // rl.playSound(tuning_fork);
 
-    const filename = "programs/ibm-logo.ch8";
+    const filename = "programs/BC_test.ch8";
     var path_buf: [std.fs.max_path_bytes]u8 = undefined;
     const path = try std.fs.realpath(filename, &path_buf);
     const file = try std.fs.openFileAbsolute(path, .{});
