@@ -100,6 +100,50 @@ fn decode_instruction(instruction_code: u16) !Instruction {
                     .regY = extractY(instruction_code),
                 },
             },
+            0x2 => .{ // 8XY2
+                .And = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+
+            0x3 => .{ // 8XY3
+                .Xor = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+            0x4 => .{ // 8XY4
+                .AddReg = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+            0x5 => .{ // 8XY5
+                .SubtractY = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+            // 8XY6 done later, with the other shift
+            0x7 => .{ // 8XY7
+                .SubtractX = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+            0x6 => .{ // 8XY6
+                .ShiftRight = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
+            0xE => .{ // 8XYE
+                .ShiftLeft = .{
+                    .regX = extractX(instruction_code),
+                    .regY = extractY(instruction_code),
+                },
+            },
             else => error.InvalidInstruction,
         },
         // 0x9 is earlier, with the other conditional skips.
