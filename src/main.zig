@@ -183,6 +183,54 @@ fn decode_instruction(instruction_code: u16) !Instruction {
             },
             else => error.InvalidInstruction,
         },
+        0xF => switch (@as(u8, @truncate(instruction_code))) {
+            0x07 => .{ // FX07
+                .ReadDelayTimer = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x15 => .{ // FX15
+                .SetDelayTimer = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x18 => .{ // FX18
+                .SetSoundTimer = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x0A => .{ // FX0A
+                .ReadInput = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x1E => .{ // FX1E
+                .AddIndex = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x29 => .{ // FX29
+                .GetCharacter = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x33 => .{ // FX33
+                .ConvertToDecimal = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x55 => .{ // FX55
+                .Store = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            0x65 => .{ // FX65
+                .Load = .{
+                    .reg = extractX(instruction_code),
+                },
+            },
+            else => error.InvalidInstruction,
+        },
         else => error.InvalidInstruction,
     };
 }
@@ -217,6 +265,7 @@ const Instruction = union(enum) {
     SetDelayTimer: struct { reg: u4 },
     SetSoundTimer: struct { reg: u4 },
     ReadInput: struct { reg: u4 },
+    AddIndex: struct { reg: u4 },
     GetCharacter: struct { reg: u4 },
     ConvertToDecimal: struct { reg: u4 },
     Store: struct { reg: u4 },
